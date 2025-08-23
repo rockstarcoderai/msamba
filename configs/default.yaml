@@ -1,0 +1,127 @@
+# Enhanced MSAmba Default Configuration
+
+# Model architecture
+model:
+  # Core SSM parameters
+  d_model: 256
+  d_state: 16
+  d_conv: 4
+  expand: 2
+
+  # Modality dimensions
+  text_dim: 768
+  audio_dim: 74
+  vision_dim: 47
+
+  # Hierarchy settings
+  hierarchy_levels: 3
+  central_mod: "text" # text|audio|vision
+
+  # ISM (Intra-Modal Sequential Mamba) settings
+  use_glce: true
+  glce_scales: [1, 2, 4]
+
+  # CHM (Cross-Modal Hybrid Mamba) settings
+  use_self_attn: true
+  num_heads: 8
+
+  # SGSM (Sentiment-Guided State Modulation) settings
+  use_sgsm: true
+  sgsm_alpha: 0.3
+  sgsm_drop: 0.2
+  vad_dim: 3
+  polarity_dim: 1
+
+  # Emotion-Saliency settings
+  use_saliency: true
+  saliency_floor: 0.25
+  emotion_classes: 7
+
+  # EMA Memory settings
+  use_memory: true
+  memory_tau: 0.9
+  memory_size: 64
+  drop_memory: 0.2
+
+  # Segmentation
+  segment_len: 0.75 # seconds
+  segment_jitter: 0.1
+
+  # Output settings
+  num_classes: 7
+  dropout: 0.1
+
+# Training configuration
+training:
+  # Optimization
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  batch_size: 32
+  num_epochs: 100
+  warmup_steps: 1000
+
+  # Regularization
+  gradient_clip: 1.0
+  label_smoothing: 0.1
+
+  # Loss weights
+  regression_weight: 1.0
+  classification_weight: 1.0
+  consistency_weight: 0.1
+  kl_weight: 0.01
+
+  # Scheduling
+  scheduler: "cosine" # cosine|linear|step
+  min_lr: 1.0e-6
+
+  # Early stopping
+  patience: 10
+  min_delta: 1.0e-4
+
+  # Checkpointing
+  save_every: 5
+  keep_best: true
+
+# Data configuration
+data:
+  # Dataset
+  dataset: "mosi" # mosi|mosei|chsims
+  data_path: "data/"
+
+  # Preprocessing
+  normalize: true
+  use_synthetic: false
+
+  # Augmentation
+  temporal_jitter: true
+  feature_noise: 0.01
+
+  # Validation split
+  val_ratio: 0.2
+  test_ratio: 0.2
+  random_seed: 42
+
+# Logging configuration
+logging:
+  # Wandb
+  use_wandb: true
+  project: "enhanced-msamaba"
+  entity: null
+
+  # Local logging
+  log_dir: "logs/"
+  log_level: "INFO"
+
+  # Metrics
+  log_every: 10
+  eval_every: 100
+
+# Experiment settings
+experiment_name: "baseline"
+output_dir: "outputs/"
+device: "auto" # auto|cpu|cuda
+num_workers: 4
+
+# Reproducibility
+seed: 42
+deterministic: true

@@ -1,0 +1,120 @@
+# Enhanced MSAmba Ablation Study Configuration
+
+# Base configuration (inherits from default.yaml)
+defaults:
+  - default
+
+# Override experiment name
+experiment_name: "ablation_study"
+
+# Ablation study parameters
+ablation:
+  # Factorial design: 2^3 = 8 configurations
+  factors:
+    - name: "sgsm"
+      values: [true, false]
+    - name: "saliency"
+      values: [true, false]
+    - name: "memory"
+      values: [true, false]
+
+  # Capacity matching for fair comparison
+  capacity_matched: true
+
+  # Statistical validation
+  num_runs: 5 # Multiple runs for statistical significance
+  bootstrap_samples: 1000
+  confidence_level: 0.95
+
+# Individual ablation configurations
+experiments:
+  baseline:
+    model:
+      use_sgsm: true
+      use_saliency: true
+      use_memory: true
+    experiment_name: "baseline"
+
+  no_sgsm:
+    model:
+      use_sgsm: false
+      use_saliency: true
+      use_memory: true
+    experiment_name: "no_sgsm"
+
+  no_saliency:
+    model:
+      use_sgsm: true
+      use_saliency: false
+      use_memory: true
+    experiment_name: "no_saliency"
+
+  no_memory:
+    model:
+      use_sgsm: true
+      use_saliency: true
+      use_memory: false
+    experiment_name: "no_memory"
+
+  no_sgsm_saliency:
+    model:
+      use_sgsm: false
+      use_saliency: false
+      use_memory: true
+    experiment_name: "no_sgsm_saliency"
+
+  no_sgsm_memory:
+    model:
+      use_sgsm: false
+      use_saliency: true
+      use_memory: false
+    experiment_name: "no_sgsm_memory"
+
+  no_saliency_memory:
+    model:
+      use_sgsm: true
+      use_saliency: false
+      use_memory: false
+    experiment_name: "no_saliency_memory"
+
+  no_enhancements:
+    model:
+      use_sgsm: false
+      use_saliency: false
+      use_memory: false
+    experiment_name: "no_enhancements"
+
+# Segment length ablation
+segment_ablation:
+  enabled: true
+  lengths: [0.5, 0.75, 1.0, 1.5] # seconds
+
+# Central modality ablation
+modality_ablation:
+  enabled: true
+  modalities: ["text", "audio", "vision"]
+
+# Hierarchy level ablation
+hierarchy_ablation:
+  enabled: true
+  levels: [1, 2, 3]
+
+# Training settings for ablations
+training:
+  # Reduced epochs for faster ablation
+  num_epochs: 50
+
+  # Early stopping for efficiency
+  patience: 5
+
+  # More frequent evaluation
+  eval_every: 50
+
+# Logging for ablations
+logging:
+  # Group experiments in wandb
+  use_wandb: true
+  project: "enhanced-msamaba-ablations"
+
+  # Tag experiments
+  tags: ["ablation", "factorial_design"]
