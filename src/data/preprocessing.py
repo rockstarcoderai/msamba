@@ -661,6 +661,156 @@ class MultimodalPreprocessor:
         
         logger.info(f"Loaded preprocessing config from {filepath}")
 
+    def save_state(self, save_path: str):
+        """Save preprocessing state."""
+        state = {
+            'text_processor': self.text_processor,
+            'audio_processor': self.audio_processor,
+            'vision_processor': self.vision_processor,
+            'aligner': self.aligner,
+            'normalizer': self.normalizer
+        }
+        torch.save(state, save_path)
+        logger.info(f"Preprocessing state saved to {save_path}")
+    
+    def load_state(self, load_path: str):
+        """Load preprocessing state."""
+        state = torch.load(load_path)
+        self.text_processor = state['text_processor']
+        self.audio_processor = state['audio_processor']
+        self.vision_processor = state['vision_processor']
+        self.aligner = state['aligner']
+        self.normalizer = state['normalizer']
+        logger.info(f"Preprocessing state loaded from {load_path}")
+
+
+class FeatureExtractor:
+    """Simple feature extractor for testing."""
+    
+    def __init__(self, config: PreprocessingConfig):
+        self.config = config
+        self.text_processor = TextProcessor(config)
+        self.audio_processor = AudioProcessor(config)
+        self.vision_processor = VisionProcessor(config)
+    
+    def extract_features(
+        self,
+        text_data: Optional[List[str]] = None,
+        audio_data: Optional[List[str]] = None,
+        vision_data: Optional[List[str]] = None
+    ) -> Dict[str, torch.Tensor]:
+        """Extract features from multimodal data."""
+        features = {}
+        
+        if text_data is not None:
+            features['text'] = self.text_processor.process(text_data)
+        
+        if audio_data is not None:
+            features['audio'] = self.audio_processor.process(audio_data)
+        
+        if vision_data is not None:
+            features['vision'] = self.vision_processor.process(vision_data)
+        
+        return features
+
+
+def normalize_features(
+    features: torch.Tensor,
+    method: str = "standard",
+    per_sample: bool = False
+) -> torch.Tensor:
+    """Normalize features using specified method."""
+    if method == "none":
+        return features
+    
+    if per_sample:
+        # Normalize each sample independently
+        normalized = torch.zeros_like(features)
+        for i in range(features.size(0)):
+            sample = features[i]
+            if method == "standard":
+                mean = sample.mean()
+                std = sample.std()
+                if std > 0:
+                    normalized[i] = (sample - mean) / std
+                else:
+                    normalized[i] = sample - mean
+            elif method == "minmax":
+                min_val = sample.min()
+                max_val = sample.max()
+                if max_val > min_val:
+                    normalized[i] = (sample - min_val) / (max_val - min_val)
+                else:
+                    normalized[i] = sample - min_val
+    else:
+        # Normalize across all samples
+        if method == "standard":
+            mean = features.mean()
+            std = features.std()
+            if std > 0:
+                normalized = (features - mean) / std
+            else:
+                normalized = features - mean
+        elif method == "minmax":
+            min_val = features.min()
+            max_val = features.max()
+            if max_val > min_val:
+                normalized = (features - min_val) / (max_val - min_val)
+            else:
+                normalized = features - min_val
+    
+    return normalized
+
+
+def segment_sequences(
+    features: torch.Tensor,
+    segment_length: int,
+    overlap: int = 0
+) -> List[torch.Tensor]:
+    """Segment long sequences into smaller chunks."""
+    segments = []
+    step = segment_length - overlap
+    
+    for start in range(0, features.size(1), step):
+        end = start + segment_length
+        if end <= features.size(1):
+            segment = features[:, start:end, :]
+            segments.append(segment)
+    
+    return segments
+
+
+def pad_sequences(
+    sequences: List[torch.Tensor],
+    max_length: int,
+    padding_value: float = 0.0
+) -> torch.Tensor:
+    """Pad sequences to the same length."""
+    if not sequences:
+        return torch.empty(0)
+    
+    # Find max length
+    max_seq_len = max(seq.size(1) for seq in sequences)
+    max_len = min(max_seq_len, max_length)
+    
+    # Pad sequences
+    padded = []
+    for seq in sequences:
+        if seq.size(1) < max_len:
+            # Pad with zeros
+            padding = torch.zeros(
+                seq.size(0), max_len - seq.size(1), seq.size(2),
+                dtype=seq.dtype, device=seq.device
+            )
+            padded_seq = torch.cat([seq, padding], dim=1)
+        else:
+            # Truncate if too long
+            padded_seq = seq[:, :max_len, :]
+        
+        padded.append(padded_seq)
+    
+    return torch.stack(padded)
+
 
 def preprocess_dataset(
     raw_data_path: str,

@@ -6,7 +6,7 @@ from .chm import CHMBlock
 from .sgsm import SGSM, SentimentProbe, AdaptiveSGSM
 from .memory import EMAMemory, ClipMemoryManager
 from .saliency import SaliencyScorer, EmotionAwareFusion
-from .hierarchical_model import EnhancedMSAmba, HierarchicalMSAmba
+from .hierarchical_model import HierarchicalMSAmba
 
 __all__ = [
     # Core SSM components
@@ -28,6 +28,5 @@ __all__ = [
     'EmotionAwareFusion',
     
     # Main models
-    'EnhancedMSAmba',
     'HierarchicalMSAmba'
 ]

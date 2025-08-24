@@ -717,49 +717,62 @@ def validate_synthetic_data(data_path: str) -> Dict[str, Any]:
 
 
 def demo_synthetic_generation():
-    """Demo synthetic data generation with visualization."""
-    print("Demonstrating synthetic multimodal data generation...")
-    
-    # Create config for small demo
-    config = SyntheticConfig(
-        n_samples_train=10,
-        n_samples_valid=5,
-        n_samples_test=5,
-        seq_len_range=(10, 30),
-        target_seq_len=25,
-        add_temporal_patterns=True,
-        correlation_strength=0.7
-    )
-    
+    """Demonstrate synthetic data generation."""
+    config = SyntheticConfig()
     generator = SyntheticDataGenerator(config)
     
-    # Generate a few samples
-    print("\nGenerating sample data...")
-    samples = []
-    for i in range(5):
-        sample = generator.generate_sample(i)
-        samples.append(sample)
-        print(f"Sample {i}: label={sample['label']:.3f}, base_sentiment={sample['base_sentiment']:.3f}")
+    # Generate a small batch
+    batch = generator.generate_batch(batch_size=4)
     
-    # Show feature shapes
-    sample = samples[0]
-    print(f"\nFeature shapes:")
-    print(f"Text: {sample['text'].shape}")
-    print(f"Audio: {sample['audio'].shape}")
-    print(f"Vision: {sample['vision'].shape}")
+    print("Synthetic batch generated:")
+    for modality, data in batch.items():
+        if modality != 'labels':
+            print(f"  {modality}: {data.shape}")
+        else:
+            print(f"  {modality}: {data}")
     
-    # Show some statistics
-    print(f"\nSample statistics:")
-    for modality in ['text', 'audio', 'vision']:
-        features = sample[modality]
-        print(f"{modality}: mean={np.mean(features):.3f}, std={np.std(features):.3f}")
+    return batch
+
+
+def generate_synthetic_batch(
+    batch_size: int = 32,
+    seq_len: int = 50,
+    text_dim: int = 768,
+    audio_dim: int = 74,
+    vision_dim: int = 47,
+    num_classes: int = 7
+) -> Dict[str, torch.Tensor]:
+    """
+    Generate a synthetic batch for testing.
     
-    # Show sentiment sequence for one sample
-    print(f"\nSentiment sequence (first 10 timesteps):")
-    sentiment_seq = sample['sentiment_sequence'][:10]
-    print([f"{s:.2f}" for s in sentiment_seq])
+    Args:
+        batch_size: Number of samples in batch
+        seq_len: Sequence length
+        text_dim: Text feature dimension
+        audio_dim: Audio feature dimension
+        vision_dim: Vision feature dimension
+        num_classes: Number of output classes
+        
+    Returns:
+        Dictionary with synthetic data
+    """
+    # Generate random features
+    text_features = torch.randn(batch_size, seq_len, text_dim)
+    audio_features = torch.randn(batch_size, seq_len, audio_dim)
+    vision_features = torch.randn(batch_size, seq_len, vision_dim)
     
-    print("\nSynthetic data generation completed successfully!")
+    # Generate random labels
+    if num_classes > 1:
+        labels = torch.randint(0, num_classes, (batch_size,))
+    else:
+        labels = torch.rand(batch_size) * 6 - 3  # Range [-3, 3]
+    
+    return {
+        'text': text_features,
+        'audio': audio_features,
+        'vision': vision_features,
+        'labels': labels
+    }
 
 
 # Example usage and testing

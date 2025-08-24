@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Optional, Tuple
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -295,3 +296,13 @@ def create_loss_function(config: Dict) -> MultimodalLoss:
         consistency_config=config.get('consistency', {}),
         kl_config=config.get('kl_regularization', {})
     )
+
+
+@dataclass
+class LossConfig:
+    """Simple configuration class for losses."""
+    sentiment_weight: float = 1.0
+    consistency_weight: float = 0.1
+    kl_weight: float = 0.01
+    regression_weight: float = 1.0
+    classification_weight: float = 1.0

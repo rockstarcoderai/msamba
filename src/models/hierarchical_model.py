@@ -15,10 +15,10 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 import math
 from dataclasses import dataclass
 
-from .ism import ISM
-from .chm import CHM
+from .ism import ISMBlock as ISM
+from .chm import CHMBlock as CHM
 from .sgsm import SGSM
-from .saliency import EmotionSaliencyScorer
+from .saliency import SaliencyScorer as EmotionSaliencyScorer
 from .memory import EMAMemory
 
 
