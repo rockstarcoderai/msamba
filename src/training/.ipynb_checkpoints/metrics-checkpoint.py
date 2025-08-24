@@ -11,6 +11,7 @@ from sklearn.metrics import (
 )
 from scipy.stats import pearsonr, spearmanr
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -120,54 +121,55 @@ def bootstrap_confidence(
     targets: torch.Tensor,
     metric_fn: callable,
     n_bootstrap: int = 1000,
-    confidence: float = 0.95,
+    confidence_level: float = 0.95
 ) -> Tuple[float, float, float]:
     """
     Compute bootstrap confidence intervals for a metric.
     
     Args:
         predictions: Model predictions
-        targets: Ground truth
-        metric_fn: Metric function to bootstrap
+        targets: Ground truth targets
+        metric_fn: Function to compute metric
         n_bootstrap: Number of bootstrap samples
-        confidence: Confidence level
+        confidence_level: Confidence level (e.g., 0.95 for 95%)
     
     Returns:
-        (mean, lower_bound, upper_bound)
+        (metric_value, lower_ci, upper_ci)
     """
-    pred_np = predictions.cpu().numpy()
-    target_np = targets.cpu().numpy()
-    n_samples = len(pred_np)
+    pred_np = predictions.cpu().numpy().flatten()
+    target_np = targets.cpu().numpy().flatten()
     
-    bootstrap_scores = []
+    n_samples = len(pred_np)
+    bootstrap_metrics = []
+    
     for _ in range(n_bootstrap):
         # Sample with replacement
-        indices = np.random.choice(n_samples, size=n_samples, replace=True)
-        boot_pred = pred_np[indices]
-        boot_target = target_np[indices]
+        indices = np.random.choice(n_samples, n_samples, replace=True)
+        sample_pred = pred_np[indices]
+        sample_target = target_np[indices]
         
+        # Compute metric
         try:
-            if isinstance(boot_pred, np.ndarray) and boot_pred.ndim > 1:
-                boot_pred = torch.from_numpy(boot_pred)
-            if isinstance(boot_target, np.ndarray):
-                boot_target = torch.from_numpy(boot_target)
-                
-            score = metric_fn(boot_pred, boot_target)
-            bootstrap_scores.append(score)
+            metric_value = metric_fn(sample_pred, sample_target)
+            bootstrap_metrics.append(metric_value)
         except:
             continue
     
-    if not bootstrap_scores:
+    if not bootstrap_metrics:
         return 0.0, 0.0, 0.0
     
-    bootstrap_scores = np.array(bootstrap_scores)
-    mean_score = np.mean(bootstrap_scores)
+    bootstrap_metrics = np.array(bootstrap_metrics)
+    metric_value = metric_fn(pred_np, target_np)
     
-    alpha = 1 - confidence
-    lower_bound = np.percentile(bootstrap_scores, 100 * alpha / 2)
-    upper_bound = np.percentile(bootstrap_scores, 100 * (1 - alpha / 2))
+    # Compute confidence intervals
+    alpha = 1 - confidence_level
+    lower_percentile = (alpha / 2) * 100
+    upper_percentile = (1 - alpha / 2) * 100
     
-    return float(mean_score), float(lower_bound), float(upper_bound)
+    lower_ci = np.percentile(bootstrap_metrics, lower_percentile)
+    upper_ci = np.percentile(bootstrap_metrics, upper_percentile)
+    
+    return metric_value, lower_ci, upper_ci
 
 
 class SentimentMetrics:
@@ -309,12 +311,37 @@ def evaluate_model(
     
     with torch.no_grad():
         for batch in dataloader:
-            # Move batch to device
-            inputs = {k: v.to(device) for k, v in batch.items() 
-                     if k not in ['targets', 'regression_targets', 'classification_targets']}
+            # Move batch to device - handle nested dictionaries
+            inputs = {}
+            for k, v in batch.items():
+                if k not in ['targets', 'regression_targets', 'classification_targets', 'labels', 'ids']:
+                    if isinstance(v, torch.Tensor):
+                        inputs[k] = v.to(device)
+                    elif isinstance(v, dict):
+                        # Handle nested modality dictionaries
+                        for mod, tensor in v.items():
+                            if isinstance(tensor, torch.Tensor):
+                                inputs[mod] = tensor.to(device)
+                            else:
+                                inputs[mod] = tensor
+                    else:
+                        inputs[k] = v
+            
+            # Ensure we only pass modality inputs to the model with correct data types
+            model_inputs = {}
+            for modality in ['text', 'audio', 'vision']:
+                if modality in inputs:
+                    tensor = inputs[modality]
+                    if isinstance(tensor, torch.Tensor):
+                        # Convert to float32 if it's boolean or other type
+                        if tensor.dtype != torch.float32:
+                            tensor = tensor.float()
+                        model_inputs[modality] = tensor
+                    else:
+                        model_inputs[modality] = tensor
             
             # Forward pass
-            outputs = model(**inputs)
+            outputs = model(model_inputs)
             
             # Prepare targets
             targets = {}
@@ -413,3 +440,45 @@ def create_metrics_summary(
     
     summary.append("=" * 50)
     return "\n".join(summary)
+
+
+@dataclass
+class MetricConfig:
+    """Simple configuration class for metrics."""
+    compute_accuracy: bool = True
+    compute_f1: bool = True
+    compute_mae: bool = True
+    compute_correlation: bool = True
+    f1_average: str = 'weighted'
+    threshold: Optional[float] = None
+
+
+class MetricsCalculator:
+    """Simple metrics calculator class."""
+    
+    def __init__(self, config: MetricConfig):
+        self.config = config
+    
+    def compute_metrics(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor
+    ) -> Dict[str, float]:
+        """Compute all configured metrics."""
+        metrics = {}
+        
+        if self.config.compute_accuracy:
+            metrics['accuracy'] = compute_accuracy(predictions, targets, self.config.threshold)
+        
+        if self.config.compute_f1:
+            metrics['f1'] = compute_f1(predictions, targets, self.config.f1_average, self.config.threshold)
+        
+        if self.config.compute_mae:
+            metrics['mae'] = compute_mae(predictions, targets)
+        
+        if self.config.compute_correlation:
+            pearson_r, spearman_r = compute_correlation(predictions, targets)
+            metrics['pearson_r'] = pearson_r
+            metrics['spearman_r'] = spearman_r
+        
+        return metrics

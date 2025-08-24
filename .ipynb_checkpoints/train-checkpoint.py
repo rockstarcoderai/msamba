@@ -178,7 +178,7 @@ def train_single_experiment(
     # Final evaluation on test set
     print("Evaluating on test set...")
     test_metrics = evaluate_model(
-        model=trainer.best_model if trainer.best_model else model,
+        model=model,  # Use the current model for evaluation
         dataloader=test_loader,
         device=device,
         num_classes=config.model.num_classes,

@@ -311,12 +311,37 @@ def evaluate_model(
     
     with torch.no_grad():
         for batch in dataloader:
-            # Move batch to device
-            inputs = {k: v.to(device) for k, v in batch.items() 
-                     if k not in ['targets', 'regression_targets', 'classification_targets']}
+            # Move batch to device - handle nested dictionaries
+            inputs = {}
+            for k, v in batch.items():
+                if k not in ['targets', 'regression_targets', 'classification_targets', 'labels', 'ids']:
+                    if isinstance(v, torch.Tensor):
+                        inputs[k] = v.to(device)
+                    elif isinstance(v, dict):
+                        # Handle nested modality dictionaries
+                        for mod, tensor in v.items():
+                            if isinstance(tensor, torch.Tensor):
+                                inputs[mod] = tensor.to(device)
+                            else:
+                                inputs[mod] = tensor
+                    else:
+                        inputs[k] = v
+            
+            # Ensure we only pass modality inputs to the model with correct data types
+            model_inputs = {}
+            for modality in ['text', 'audio', 'vision']:
+                if modality in inputs:
+                    tensor = inputs[modality]
+                    if isinstance(tensor, torch.Tensor):
+                        # Convert to float32 if it's boolean or other type
+                        if tensor.dtype != torch.float32:
+                            tensor = tensor.float()
+                        model_inputs[modality] = tensor
+                    else:
+                        model_inputs[modality] = tensor
             
             # Forward pass
-            outputs = model(**inputs)
+            outputs = model(model_inputs)
             
             # Prepare targets
             targets = {}
