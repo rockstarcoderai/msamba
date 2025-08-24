@@ -15,8 +15,8 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 import math
 from dataclasses import dataclass
 
-from .ism import ISMBlock as ISM
-from .chm import CHMBlock as CHM
+from .ism import ISMBlock
+from .chm import CHMBlock
 from .sgsm import SGSM
 from .saliency import SaliencyScorer as EmotionSaliencyScorer
 from .memory import EMAMemory
@@ -167,13 +167,12 @@ class SegmentProcessor(nn.Module):
         # Segment-level ISMs for each modality
         self.segment_isms = nn.ModuleDict()
         for modality in self.modalities:
-            self.segment_isms[modality] = ISM(
+            self.segment_isms[modality] = ISMBlock(
                 d_model=config.d_model,
                 d_state=config.d_state,
-                n_layers=config.n_layers // 2,  # Fewer layers at segment level
-                use_sgsm=config.use_sgsm,
-                sgsm_alpha=config.sgsm_alpha,
-                sgsm_drop=config.sgsm_drop
+                d_conv=config.d_conv,
+                expand_factor=config.expand,
+                use_glce=config.use_glce
             )
         
         # Cross-modal exchange
@@ -184,12 +183,11 @@ class SegmentProcessor(nn.Module):
         
         # Optional CHM for final segment fusion
         if len(self.modalities) > 1:
-            self.chm = CHM(
-                d_model=config.d_model,
-                modalities=config.modalities,
-                central_mod=config.central_mod,
-                d_state=config.d_state,
+            self.chm = CHMBlock(
+                dim=config.d_model,
+                heads=config.num_heads,
                 use_self_attn=config.use_self_attn,
+                central_modality=config.central_mod,
                 use_memory=config.use_memory,
                 memory_tau=config.memory_tau,
                 drop_memory=config.drop_memory
@@ -225,11 +223,27 @@ class SegmentProcessor(nn.Module):
             if saliency_weights is not None and modality in saliency_weights:
                 features = features * saliency_weights[modality].unsqueeze(-1)
             
+            # Apply sentiment context to features if available
+            if sentiment_context is not None and modality in sentiment_context:
+                sentiment_params = sentiment_context[modality]
+                if isinstance(sentiment_params, dict) and 'gamma' in sentiment_params and 'beta' in sentiment_params:
+                    # Apply FiLM conditioning: γ ⊙ x + β
+                    gamma = sentiment_params['gamma'].unsqueeze(1).expand_as(features)
+                    beta = sentiment_params['beta'].unsqueeze(1).expand_as(features)
+                    features = gamma * features + beta
+            
             # Process with segment ISM
-            processed, representation = self.segment_isms[modality](
-                features,
-                sentiment_context=sentiment_context.get(modality) if sentiment_context else None
-            )
+            ism_output = self.segment_isms[modality](features)
+            
+            if isinstance(ism_output, tuple):
+                processed, attention_weights = ism_output
+                # ISM returns (output, attention_weights), but we need both processed and representation
+                # Use the main output for both since attention_weights can be None
+                representation = processed
+            else:
+                # Handle case where ISM returns single output
+                processed = ism_output
+                representation = ism_output
             
             segment_features[modality] = processed
             segment_representations[modality] = representation
@@ -240,16 +254,13 @@ class SegmentProcessor(nn.Module):
         # Final segment-level fusion if CHM is available
         updated_memory = memory_state
         if hasattr(self, 'chm') and len(self.modalities) > 1:
-            fused_features, updated_memory = self.chm(
-                segment_features,
-                memory_state=memory_state
-            )
+            # CHM returns (cross_modal_cls_token, cross_modal_features)
+            cls_token, fused_features = self.chm(segment_features)
+            
             # Update segment representations with fused information
             for modality in self.modalities:
-                segment_representations[modality] = fused_features.get(
-                    modality, 
-                    segment_representations[modality]
-                )
+                if modality in fused_features:
+                    segment_representations[modality] = fused_features[modality]
         
         return segment_features, segment_representations, updated_memory
 
@@ -289,13 +300,12 @@ class HierarchicalMSAmba(nn.Module):
         # Level 1: Token-level ISMs
         self.token_isms = nn.ModuleDict()
         for modality in self.modalities:
-            self.token_isms[modality] = ISM(
+            self.token_isms[modality] = ISMBlock(
                 d_model=config.d_model,
                 d_state=config.d_state,
-                n_layers=config.n_layers,
-                use_sgsm=config.use_sgsm,
-                sgsm_alpha=config.sgsm_alpha,
-                sgsm_drop=config.sgsm_drop
+                d_conv=config.d_conv,
+                expand_factor=config.expand,
+                use_glce=config.use_glce
             )
         
         # Level 2: Segment processor (if hierarchy_levels >= 2)
@@ -304,12 +314,11 @@ class HierarchicalMSAmba(nn.Module):
         
         # Level 3: Final fusion (if hierarchy_levels >= 3)
         if config.hierarchy_levels >= 3:
-            self.final_chm = CHM(
-                d_model=config.d_model,
-                modalities=config.modalities,
-                central_mod=config.central_mod,
-                d_state=config.d_state,
+            self.final_chm = CHMBlock(
+                dim=config.d_model,
+                heads=config.num_heads,
                 use_self_attn=config.use_self_attn,
+                central_modality=config.central_mod,
                 use_memory=config.use_memory,
                 memory_tau=config.memory_tau,
                 drop_memory=config.drop_memory
@@ -318,22 +327,22 @@ class HierarchicalMSAmba(nn.Module):
         # Optional components
         if config.use_sgsm:
             self.sgsm = SGSM(
-                d_model=config.d_model,
+                hidden_dim=config.d_model,
                 alpha=config.sgsm_alpha,
                 dropout=config.sgsm_drop
             )
         
         if config.use_saliency:
             self.saliency_scorer = EmotionSaliencyScorer(
-                d_model=config.d_model,
-                floor_value=config.saliency_floor
+                input_dim=config.d_model,
+                saliency_floor=config.saliency_floor
             )
         
         if config.use_memory:
             self.memory = EMAMemory(
-                d_model=config.d_model,
+                memory_dim=config.d_model,
                 tau=config.memory_tau,
-                drop_prob=config.drop_memory
+                drop_memory_prob=config.drop_memory
             )
         
         # Final classifier/regressor
@@ -413,9 +422,27 @@ class HierarchicalMSAmba(nn.Module):
         
         # Handle missing modalities
         available_modalities = []
+        
         for modality in self.modalities:
             if modality in inputs:
-                if missing_mask is None or not missing_mask.get(modality, False):
+                # Check if modality is missing - handle both tensor and boolean values
+                is_missing = False
+                if missing_mask is not None and modality in missing_mask:
+                    missing_value = missing_mask[modality]
+                    if torch.is_tensor(missing_value):
+                        # Handle tensor values safely
+                        if missing_value.numel() == 0:
+                            is_missing = False
+                        elif missing_value.dim() == 0:  # Scalar tensor
+                            is_missing = missing_value.item()
+                        else:  # Multi-dimensional tensor
+                            # For batch processing, we need to check if ALL samples are missing this modality
+                            # If any sample has this modality available, we should include it
+                            is_missing = missing_value.all().item()
+                    else:
+                        is_missing = bool(missing_value)
+                
+                if not is_missing:
                     available_modalities.append(modality)
         
         if not available_modalities:
@@ -439,7 +466,24 @@ class HierarchicalMSAmba(nn.Module):
             features = encoded_features[modality]
             
             # Process with token-level ISM
-            processed, representation = self.token_isms[modality](features)
+            ism_output = self.token_isms[modality](features)
+            
+            if isinstance(ism_output, tuple):
+                processed, attention_weights = ism_output
+                # ISM returns (output, attention_weights), but we need both processed and representation
+                # Use the main output for both since attention_weights can be None
+                representation = processed
+            else:
+                # Handle case where ISM returns single output
+                processed = ism_output
+                representation = ism_output
+            
+            # Ensure we have valid tensors
+            if processed is None:
+                raise ValueError(f"ISM for modality '{modality}' returned None for processed output")
+            if representation is None:
+                raise ValueError(f"ISM for modality '{modality}' returned None for representation output")
+            
             token_features[modality] = processed
             token_representations[modality] = representation
         
@@ -456,10 +500,9 @@ class HierarchicalMSAmba(nn.Module):
         # Generate saliency weights if using saliency
         saliency_weights = None
         if hasattr(self, 'saliency_scorer'):
-            saliency_weights = {}
-            for modality in available_modalities:
-                weights = self.saliency_scorer(token_features[modality])
-                saliency_weights[modality] = weights
+            # Pass all modality features to saliency scorer at once
+            _, saliency_scores = self.saliency_scorer(token_features, return_scores=True)
+            saliency_weights = saliency_scores
         
         current_features = token_features
         current_representations = token_representations
@@ -477,10 +520,9 @@ class HierarchicalMSAmba(nn.Module):
         
         # Level 3: Final fusion (if enabled)
         if self.config.hierarchy_levels >= 3 and hasattr(self, 'final_chm'):
-            fused_features, memory_state = self.final_chm(
-                current_features,
-                memory_state=memory_state
-            )
+            # CHM returns (cross_modal_cls_token, cross_modal_features)
+            cls_token, fused_features = self.final_chm(current_features)
+            
             # Use fused features for final representation
             for modality in available_modalities:
                 if modality in fused_features:
@@ -508,8 +550,15 @@ class HierarchicalMSAmba(nn.Module):
         # Final prediction
         predictions = self.classifier(combined_repr)
         
-        # Prepare outputs
-        outputs = {"predictions": predictions}
+        # Pool predictions across sequence dimension to get single prediction per sample
+        if predictions.dim() > 2:  # If predictions have sequence dimension
+            predictions = predictions.mean(dim=1)  # Pool across sequence dimension
+        
+        # Prepare outputs - match loss function expectations
+        if self.task_type == "regression":
+            outputs = {"regression": predictions}
+        else:  # classification
+            outputs = {"classification": predictions}
         
         if return_intermediates:
             outputs.update({

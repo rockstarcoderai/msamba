@@ -37,7 +37,7 @@ class CHMBlock(nn.Module):
         self.use_memory = use_memory
         
         # Cross-modal SSM for fusion
-        self.cross_modal_ssm = SelectiveSSM(dim, causal=False)
+        self.cross_modal_ssm = SelectiveSSM(dim)
         
         # Optional self-attention with small dimension
         if use_self_attn and heads > 0:
@@ -59,9 +59,9 @@ class CHMBlock(nn.Module):
         # EMA Memory
         if use_memory:
             self.memory = EMAMemory(
-                dim=dim,
+                memory_dim=dim,
                 tau=memory_tau,
-                drop_prob=drop_memory
+                drop_memory_prob=drop_memory
             )
         
         # Normalization layers

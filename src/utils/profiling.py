@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from contextlib import contextmanager
 import logging
+from torch.utils.data import DataLoader
 
 logger = logging.getLogger(__name__)
 
@@ -330,69 +331,67 @@ def benchmark_context(name: str):
 
 def benchmark_training(
     model: nn.Module,
-    train_loader: torch.utils.data.DataLoader,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    config: Dict[str, Any],
     device: torch.device,
-    num_batches: int = 10,
-) -> Dict[str, float]:
+    num_steps: int = 100
+) -> Dict[str, Any]:
     """Benchmark training performance."""
-    model.train()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    criterion = torch.nn.MSELoss()
+    profiler = ModelProfiler(model, device)
     
-    # Warmup
-    for i, batch in enumerate(train_loader):
-        if i >= 3:
-            break
-        
-        inputs = {k: v.to(device) for k, v in batch.items() 
-                 if k not in ['targets', 'regression_targets', 'classification_targets']}
-        targets = batch.get('regression_targets', torch.randn(inputs[next(iter(inputs))].size(0), 1)).to(device)
-        
-        optimizer.zero_grad()
-        outputs = model(**inputs)
-        loss = criterion(outputs.get('regression', outputs.get('logits', list(outputs.values())[0])), targets)
-        loss.backward()
-        optimizer.step()
+    # Benchmark forward pass
+    forward_stats = profiler.benchmark_forward(train_loader, num_steps=num_steps)
     
-    # Timing runs
-    times = []
-    memory_tracker = MemoryTracker(device)
+    # Benchmark backward pass
+    backward_stats = profiler.benchmark_backward(train_loader, num_steps=num_steps)
     
-    for i, batch in enumerate(train_loader):
-        if i >= num_batches:
-            break
-        
-        memory_tracker.snapshot(f"batch_{i}_start")
-        
-        inputs = {k: v.to(device) for k, v in batch.items() 
-                 if k not in ['targets', 'regression_targets', 'classification_targets']}
-        targets = batch.get('regression_targets', torch.randn(inputs[next(iter(inputs))].size(0), 1)).to(device)
-        
-        start_time = time.perf_counter()
-        
-        optimizer.zero_grad()
-        outputs = model(**inputs)
-        loss = criterion(outputs.get('regression', outputs.get('logits', list(outputs.values())[0])), targets)
-        loss.backward()
-        optimizer.step()
-        
-        if device.type == 'cuda':
-            torch.cuda.synchronize()
-        
-        end_time = time.perf_counter()
-        times.append((end_time - start_time) * 1000)
-        
-        memory_tracker.snapshot(f"batch_{i}_end")
-    
-    times = np.array(times)
-    peak_memory = memory_tracker.peak_memory()
+    # Benchmark memory usage
+    memory_stats = profiler.benchmark_memory(train_loader, num_steps=num_steps)
     
     return {
-        'mean_batch_time_ms': float(np.mean(times)),
-        'std_batch_time_ms': float(np.std(times)),
-        'peak_memory_mb': peak_memory,
-        'throughput_samples_per_second': len(inputs[next(iter(inputs))]) * 1000 / np.mean(times),
+        'forward': forward_stats,
+        'backward': backward_stats,
+        'memory': memory_stats,
+        'summary': {
+            'total_time': forward_stats['total_time'] + backward_stats['total_time'],
+            'throughput': num_steps / (forward_stats['total_time'] + backward_stats['total_time']),
+            'peak_memory': memory_stats['peak_memory']
+        }
     }
+
+
+class ProfilerManager:
+    """Simple profiler manager for training."""
+    
+    def __init__(self, enabled: bool = True):
+        self.enabled = enabled
+        self.profiles = {}
+    
+    def start_profile(self, name: str):
+        """Start profiling a section."""
+        if self.enabled:
+            self.profiles[name] = {'start_time': time.time()}
+    
+    def end_profile(self, name: str):
+        """End profiling a section."""
+        if self.enabled and name in self.profiles:
+            self.profiles[name]['end_time'] = time.time()
+            self.profiles[name]['duration'] = (
+                self.profiles[name]['end_time'] - self.profiles[name]['start_time']
+            )
+    
+    def get_profile(self, name: str) -> Optional[Dict[str, float]]:
+        """Get profile results for a section."""
+        return self.profiles.get(name)
+    
+    def get_all_profiles(self) -> Dict[str, Dict[str, float]]:
+        """Get all profile results."""
+        return self.profiles.copy()
+    
+    def reset(self):
+        """Reset all profiles."""
+        self.profiles.clear()
 
 
 def compare_model_sizes(models: Dict[str, nn.Module]) -> Dict[str, Dict[str, int]]:

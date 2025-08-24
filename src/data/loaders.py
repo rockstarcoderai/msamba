@@ -23,6 +23,93 @@ import random
 logger = logging.getLogger(__name__)
 
 
+def load_mosi(data_path: str, split: str = "train") -> Dict[str, Any]:
+    """Load CMU-MOSI dataset."""
+    data_path = Path(data_path)
+    file_path = data_path / f"mosi_{split}.pkl"
+    
+    if not file_path.exists():
+        # Return synthetic data if file doesn't exist
+        logger.warning(f"MOSI data file not found: {file_path}. Using synthetic data.")
+        return _generate_synthetic_mosi_data(split)
+    
+    with open(file_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    return data
+
+
+def load_mosei(data_path: str, split: str = "train") -> Dict[str, Any]:
+    """Load CMU-MOSEI dataset."""
+    data_path = Path(data_path)
+    file_path = data_path / f"mosei_{split}.pkl"
+    
+    if not file_path.exists():
+        # Return synthetic data if file doesn't exist
+        logger.warning(f"MOSEI data file not found: {file_path}. Using synthetic data.")
+        return _generate_synthetic_mosei_data(split)
+    
+    with open(file_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    return data
+
+
+def load_chsims(data_path: str, split: str = "train") -> Dict[str, Any]:
+    """Load CH-SIMS dataset."""
+    data_path = Path(data_path)
+    file_path = data_path / f"chsims_{split}.pkl"
+    
+    if not file_path.exists():
+        # Return synthetic data if file doesn't exist
+        logger.warning(f"CH-SIMS data file not found: {file_path}. Using synthetic data.")
+        return _generate_synthetic_chsims_data(split)
+    
+    with open(file_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    return data
+
+
+def _generate_synthetic_mosi_data(split: str) -> Dict[str, Any]:
+    """Generate synthetic MOSI-like data for testing."""
+    n_samples = 100 if split == "train" else 20
+    
+    return {
+        'text': np.random.randn(n_samples, 50, 768),
+        'audio': np.random.randn(n_samples, 50, 74),
+        'vision': np.random.randn(n_samples, 50, 47),
+        'labels': np.random.uniform(-3, 3, n_samples),
+        'metadata': {'split': split, 'dataset': 'mosi_synthetic'}
+    }
+
+
+def _generate_synthetic_mosei_data(split: str) -> Dict[str, Any]:
+    """Generate synthetic MOSEI-like data for testing."""
+    n_samples = 100 if split == "train" else 20
+    
+    return {
+        'text': np.random.randn(n_samples, 50, 768),
+        'audio': np.random.randn(n_samples, 50, 74),
+        'vision': np.random.randn(n_samples, 50, 47),
+        'labels': np.random.uniform(-3, 3, n_samples),
+        'metadata': {'split': split, 'dataset': 'mosei_synthetic'}
+    }
+
+
+def _generate_synthetic_chsims_data(split: str) -> Dict[str, Any]:
+    """Generate synthetic CH-SIMS-like data for testing."""
+    n_samples = 100 if split == "train" else 20
+    
+    return {
+        'text': np.random.randn(n_samples, 50, 768),
+        'audio': np.random.randn(n_samples, 50, 74),
+        'vision': np.random.randn(n_samples, 50, 47),
+        'labels': np.random.randint(0, 7, n_samples),
+        'metadata': {'split': split, 'dataset': 'chsims_synthetic'}
+    }
+
+
 @dataclass
 class DatasetConfig:
     """Configuration for dataset loading."""
@@ -35,6 +122,7 @@ class DatasetConfig:
     normalize: bool = True
     augment_training: bool = True
     missing_data_prob: float = 0.1  # Probability of missing modality during training
+    use_synthetic: bool = False  # Use synthetic data instead of loading from files
     
     def __post_init__(self):
         if self.modalities is None:
@@ -68,6 +156,10 @@ class MultimodalDataset(Dataset):
     
     def _load_data(self) -> Dict[str, Any]:
         """Load raw data from files."""
+        # Check if synthetic data should be used
+        if self.config.use_synthetic:
+            return self._generate_synthetic_data()
+        
         data_path = Path(self.config.data_path)
         
         if self.config.name.lower() in ["mosi", "mosei"]:
@@ -117,6 +209,48 @@ class MultimodalDataset(Dataset):
         with h5py.File(file_path, 'r') as f:
             for key in f.keys():
                 data[key] = f[key][:]
+        return data
+    
+    def _generate_synthetic_data(self) -> Dict[str, Any]:
+        """Generate synthetic data for testing."""
+        n_samples = 100 if self.split == "train" else 20
+        
+        # Generate synthetic features based on dataset
+        if self.config.name.lower() == "mosi":
+            data = {
+                'text': np.random.randn(n_samples, self.config.max_seq_len, 768),
+                'audio': np.random.randn(n_samples, self.config.max_seq_len, 74),
+                'vision': np.random.randn(n_samples, self.config.max_seq_len, 47),
+                'labels': np.random.uniform(-3, 3, n_samples),
+                'ids': list(range(n_samples))
+            }
+        elif self.config.name.lower() == "mosei":
+            data = {
+                'text': np.random.randn(n_samples, self.config.max_seq_len, 768),
+                'audio': np.random.randn(n_samples, self.config.max_seq_len, 74),
+                'vision': np.random.randn(n_samples, self.config.max_seq_len, 35),
+                'labels': np.random.uniform(-3, 3, n_samples),
+                'ids': list(range(n_samples))
+            }
+        elif self.config.name.lower() == "sims":
+            data = {
+                'text': np.random.randn(n_samples, self.config.max_seq_len, 768),
+                'audio': np.random.randn(n_samples, self.config.max_seq_len, 33),
+                'vision': np.random.randn(n_samples, self.config.max_seq_len, 709),
+                'labels': np.random.uniform(-1, 1, n_samples),
+                'ids': list(range(n_samples))
+            }
+        else:
+            # Default synthetic data
+            data = {
+                'text': np.random.randn(n_samples, self.config.max_seq_len, 768),
+                'audio': np.random.randn(n_samples, self.config.max_seq_len, 74),
+                'vision': np.random.randn(n_samples, self.config.max_seq_len, 47),
+                'labels': np.random.uniform(-3, 3, n_samples),
+                'ids': list(range(n_samples))
+            }
+        
+        logger.info(f"Generated synthetic {self.config.name.upper()} data: {n_samples} samples")
         return data
     
     def _standardize_data_format(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:

@@ -45,13 +45,22 @@ class GlobalLocalContextExtractor(nn.Module):
         
         # Local context via multi-scale convolutions
         self.local_convs = nn.ModuleList()
-        for kernel_size in conv_kernel_sizes:
+        
+        # Calculate output channels to ensure they sum to d_model
+        out_channels_per_conv = d_model // len(conv_kernel_sizes)
+        remaining_channels = d_model % len(conv_kernel_sizes)
+        
+        for i, kernel_size in enumerate(conv_kernel_sizes):
+            # Distribute remaining channels to first few convolutions
+            extra_channels = 1 if i < remaining_channels else 0
+            conv_out_channels = out_channels_per_conv + extra_channels
+            
             conv = nn.Conv1d(
                 in_channels=d_model,
-                out_channels=d_model // len(conv_kernel_sizes),
+                out_channels=conv_out_channels,
                 kernel_size=kernel_size,
                 padding=kernel_size // 2,
-                groups=d_model // len(conv_kernel_sizes)  # Depthwise conv for efficiency
+                groups=1  # Use groups=1 to avoid divisibility issues
             )
             self.local_convs.append(conv)
         

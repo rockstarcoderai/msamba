@@ -3,11 +3,21 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 import logging
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LossConfig:
+    """Simple configuration class for losses."""
+    sentiment_weight: float = 1.0
+    consistency_weight: float = 0.1
+    kl_weight: float = 0.01
+    regression_weight: float = 1.0
+    classification_weight: float = 1.0
 
 
 class SentimentLoss(nn.Module):
@@ -228,16 +238,33 @@ class MultimodalLoss(nn.Module):
     
     def __init__(
         self,
-        sentiment_config: Optional[Dict] = None,
-        consistency_config: Optional[Dict] = None,
-        kl_config: Optional[Dict] = None,
+        sentiment_config: Optional[Union[Dict, LossConfig]] = None,
+        consistency_config: Optional[Union[Dict, LossConfig]] = None,
+        kl_config: Optional[Union[Dict, LossConfig]] = None,
     ):
         super().__init__()
         
+        # Convert config objects to dictionaries if needed
+        sentiment_dict = sentiment_config.__dict__ if hasattr(sentiment_config, '__dict__') else (sentiment_config or {})
+        consistency_dict = consistency_config.__dict__ if hasattr(consistency_config, '__dict__') else (consistency_config or {})
+        kl_dict = kl_config.__dict__ if hasattr(kl_config, '__dict__') else (kl_config or {})
+        
         # Initialize component losses
-        self.sentiment_loss = SentimentLoss(**(sentiment_config or {}))
-        self.consistency_loss = ConsistencyLoss(**(consistency_config or {}))
-        self.kl_regularizer = KLRegularizer(**(kl_config or {}))
+        self.sentiment_loss = SentimentLoss(
+            regression_weight=sentiment_dict.get('regression_weight', 1.0),
+            classification_weight=sentiment_dict.get('classification_weight', 1.0),
+            label_smoothing=sentiment_dict.get('label_smoothing', 0.1),
+            focal_alpha=sentiment_dict.get('focal_alpha', 1.0),
+            focal_gamma=sentiment_dict.get('focal_gamma', 2.0)
+        )
+        self.consistency_loss = ConsistencyLoss(
+            modal_weight=consistency_dict.get('modal_weight', 0.1),
+            temporal_weight=consistency_dict.get('temporal_weight', 0.05),
+            temperature=consistency_dict.get('temperature', 0.1)
+        )
+        self.kl_regularizer = KLRegularizer(
+            weight=kl_dict.get('kl_weight', 0.01)
+        )
     
     def forward(
         self,
@@ -267,7 +294,7 @@ class MultimodalLoss(nn.Module):
         sentiment_losses = self.sentiment_loss(outputs, targets)
         for key, loss in sentiment_losses.items():
             all_losses[f'sentiment_{key}'] = loss
-        total_loss += sentiment_losses['total']
+        total_loss += sentiment_losses.get('total', 0.0)
         
         # Consistency regularization
         consistency_losses = self.consistency_loss(
@@ -277,7 +304,7 @@ class MultimodalLoss(nn.Module):
         )
         for key, loss in consistency_losses.items():
             all_losses[f'consistency_{key}'] = loss
-        total_loss += consistency_losses['total']
+        total_loss += consistency_losses.get('total', 0.0)
         
         # KL regularization for probe
         if probe_logits is not None:
@@ -285,7 +312,7 @@ class MultimodalLoss(nn.Module):
             all_losses['kl_regularization'] = kl_loss
             total_loss += kl_loss
         
-        all_losses['total'] = total_loss
+        all_losses['total_loss'] = total_loss
         return all_losses
 
 
@@ -296,13 +323,3 @@ def create_loss_function(config: Dict) -> MultimodalLoss:
         consistency_config=config.get('consistency', {}),
         kl_config=config.get('kl_regularization', {})
     )
-
-
-@dataclass
-class LossConfig:
-    """Simple configuration class for losses."""
-    sentiment_weight: float = 1.0
-    consistency_weight: float = 0.1
-    kl_weight: float = 0.01
-    regression_weight: float = 1.0
-    classification_weight: float = 1.0

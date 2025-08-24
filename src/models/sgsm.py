@@ -144,6 +144,34 @@ class SGSM(nn.Module):
         
         return modulated_states, kl_loss, sentiment_output
     
+    def get_conditioning_params(self, hidden_states: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Get sentiment conditioning parameters (gamma, beta) for external use.
+        
+        Args:
+            hidden_states: Input tensor [batch, hidden_dim]
+            
+        Returns:
+            Dictionary with 'gamma' and 'beta' parameters [batch, hidden_dim]
+        """
+        # Predict sentiment
+        with torch.no_grad():
+            predicted_sentiment = self.sentiment_probe(hidden_states.detach())
+        
+        # Generate FiLM parameters
+        gamma_raw = self.gamma_net(predicted_sentiment)  # [batch, hidden_dim]
+        beta_raw = self.beta_net(predicted_sentiment)    # [batch, hidden_dim]
+        
+        # Apply bounded scaling: gamma = 1 + α·tanh(gamma_raw), beta = α·tanh(beta_raw)
+        gamma = 1.0 + self.alpha * gamma_raw  # Already bounded by tanh
+        beta = self.alpha * beta_raw          # Already bounded by tanh
+        
+        return {
+            'gamma': gamma,
+            'beta': beta,
+            'sentiment': predicted_sentiment
+        }
+    
     def get_modulation_stats(self, hidden_states: torch.Tensor) -> Dict[str, float]:
         """Get statistics about modulation parameters for monitoring."""
         with torch.no_grad():

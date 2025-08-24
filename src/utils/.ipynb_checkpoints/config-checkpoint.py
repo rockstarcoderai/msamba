@@ -18,6 +18,7 @@ class ModelConfig:
     d_state: int = 16
     d_conv: int = 4
     expand: int = 2
+    n_layers: int = 6
     
     # Modality dimensions
     text_dim: int = 768
@@ -27,6 +28,7 @@ class ModelConfig:
     # Hierarchy settings
     hierarchy_levels: int = 3
     central_mod: str = "text"
+    modalities: list = field(default_factory=lambda: ["text", "audio", "vision"])
     
     # ISM settings
     use_glce: bool = True
@@ -73,6 +75,17 @@ class TrainingConfig:
     num_epochs: int = 100
     warmup_steps: int = 1000
     
+    # Advanced training settings
+    mixed_precision: bool = True
+    gradient_accumulation_steps: int = 1
+    gradient_clip_norm: float = 1.0
+    
+    # Optimizer
+    optimizer: str = "adamw"  # "adamw", "adam", "sgd"
+    beta1: float = 0.9
+    beta2: float = 0.999
+    eps: float = 1e-8
+    
     # Regularization
     gradient_clip: float = 1.0
     label_smoothing: float = 0.1
@@ -94,6 +107,21 @@ class TrainingConfig:
     # Checkpointing
     save_every: int = 5
     keep_best: bool = True
+    max_checkpoints: int = 5
+    
+    # Logging
+    log_frequency: int = 100
+    val_frequency: int = 1
+    save_frequency: int = 5
+    save_best_only: bool = True
+    
+    # Profiling
+    profile_training: bool = False
+    profile_steps: int = 100
+    
+    # Multi-GPU
+    use_ddp: bool = False
+    local_rank: int = -1
 
 
 @dataclass

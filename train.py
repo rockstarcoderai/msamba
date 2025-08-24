@@ -54,7 +54,29 @@ def create_model(config: Config, device: torch.device) -> nn.Module:
     """Create model from configuration."""
     print("Creating model...")
     
-    model = HierarchicalMSAmba(config.model)
+    # Create input dimensions dictionary from config
+    input_dims = {
+        'text': config.model.text_dim,
+        'audio': config.model.audio_dim,
+        'vision': config.model.vision_dim
+    }
+    
+    # Determine task type and num_classes based on dataset
+    if config.data.dataset.lower() in ["mosi", "mosei"]:
+        # MOSI and MOSEI are regression tasks
+        num_classes = 1
+        task_type = "regression"
+    else:
+        # Other datasets are classification tasks
+        num_classes = config.model.num_classes
+        task_type = "classification"
+    
+    model = HierarchicalMSAmba(
+        config=config.model,
+        input_dims=input_dims,
+        num_classes=num_classes,
+        task_type=task_type
+    )
     model = model.to(device)
     
     # Log model summary
@@ -67,16 +89,28 @@ def create_data_loaders(config: Config) -> tuple:
     """Create data loaders."""
     print(f"Loading {config.data.dataset.upper()} dataset...")
     
-    train_loader, val_loader, test_loader = create_dataloaders(
-        dataset_name=config.data.dataset,
+    # Create DatasetConfig object
+    from src.data.loaders import DatasetConfig
+    
+    dataset_config = DatasetConfig(
+        name=config.data.dataset,
         data_path=config.data.data_path,
+        modalities=["text", "audio", "vision"],
+        max_seq_len=50,
+        normalize=True,
+        augment_training=True,
+        use_synthetic=config.data.use_synthetic
+    )
+    
+    dataloaders = create_dataloaders(
+        config=dataset_config,
         batch_size=config.training.batch_size,
         num_workers=config.num_workers,
-        val_ratio=config.data.val_ratio,
-        test_ratio=config.data.test_ratio,
-        seed=config.data.random_seed,
-        use_synthetic=config.data.use_synthetic,
     )
+    
+    train_loader = dataloaders["train"]
+    val_loader = dataloaders["valid"]
+    test_loader = dataloaders["test"]
     
     print(f"Data loaders created:")
     print(f"  Train: {len(train_loader)} batches")

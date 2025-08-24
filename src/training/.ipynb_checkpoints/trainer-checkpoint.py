@@ -22,8 +22,9 @@ import os
 from ..models.hierarchical_model import HierarchicalMSAmba, HierarchicalConfig
 from .losses import MultimodalLoss, LossConfig
 from .metrics import MetricsCalculator, MetricConfig
-from ..utils.logging import setup_logger
+from ..utils.logging import setup_logging
 from ..utils.profiling import ProfilerManager
+from ..utils.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -212,44 +213,44 @@ class MSAmbaTrainer:
         model: HierarchicalMSAmba,
         train_loader: DataLoader,
         val_loader: DataLoader,
-        config: TrainingConfig,
-        loss_config: LossConfig,
-        metric_config: MetricConfig,
+        config: Config,
         device: torch.device,
-        output_dir: str
+        logger=None,
+        checkpoint_dir: str = None
     ):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.config = config
         self.device = device
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.logger = logger
+        self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else Path("checkpoints")
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         
         # Move model to device
         self.model = self.model.to(device)
         
         # Setup loss and metrics
-        self.loss_fn = MultimodalLoss(loss_config).to(device)
-        self.metrics_calculator = MetricsCalculator(metric_config)
+        self.loss_fn = MultimodalLoss(LossConfig()).to(device)
+        self.metrics_calculator = MetricsCalculator(MetricConfig())
         
         # Setup training components
         self.optimizer = self._setup_optimizer()
         self.scheduler = self._setup_scheduler()
-        self.scaler = GradScaler() if config.mixed_precision else None
+        self.scaler = GradScaler() if config.training.mixed_precision else None
         
         # Setup utilities
         self.checkpoint_manager = CheckpointManager(
-            self.output_dir / "checkpoints",
-            config.max_checkpoints
+            self.checkpoint_dir,
+            getattr(config.training, 'max_checkpoints', 5)
         )
         self.early_stopping = EarlyStopping(
-            config.early_stopping_patience,
-            config.early_stopping_min_delta
+            getattr(config.training, 'early_stopping_patience', 15),
+            getattr(config.training, 'early_stopping_min_delta', 1e-4)
         )
         
         # Setup profiler
-        self.profiler = ProfilerManager() if config.profile_training else None
+        self.profiler = ProfilerManager() if getattr(config.training, 'profile_training', False) else None
         
         # Setup logging
         self._setup_logging()
@@ -267,70 +268,70 @@ class MSAmbaTrainer:
     
     def _setup_optimizer(self) -> torch.optim.Optimizer:
         """Setup optimizer."""
-        if self.config.optimizer.lower() == "adamw":
+        if getattr(self.config.training, 'optimizer', 'adamw').lower() == "adamw":
             optimizer = torch.optim.AdamW(
                 self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-                betas=(self.config.beta1, self.config.beta2),
-                eps=self.config.eps
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.weight_decay,
+                betas=(getattr(self.config.training, 'beta1', 0.9), getattr(self.config.training, 'beta2', 0.999)),
+                eps=getattr(self.config.training, 'eps', 1e-8)
             )
-        elif self.config.optimizer.lower() == "adam":
+        elif getattr(self.config.training, 'optimizer', 'adamw').lower() == "adam":
             optimizer = torch.optim.Adam(
                 self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-                betas=(self.config.beta1, self.config.beta2),
-                eps=self.config.eps
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.weight_decay,
+                betas=(getattr(self.config.training, 'beta1', 0.9), getattr(self.config.training, 'beta2', 0.999)),
+                eps=getattr(self.config.training, 'eps', 1e-8)
             )
-        elif self.config.optimizer.lower() == "sgd":
+        elif getattr(self.config.training, 'optimizer', 'adamw').lower() == "sgd":
             optimizer = torch.optim.SGD(
                 self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.weight_decay,
                 momentum=0.9
             )
         else:
-            raise ValueError(f"Unknown optimizer: {self.config.optimizer}")
+            raise ValueError(f"Unknown optimizer: {getattr(self.config.training, 'optimizer', 'adamw')}")
         
         return optimizer
     
     def _setup_scheduler(self) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
         """Setup learning rate scheduler."""
-        if self.config.scheduler.lower() == "cosine":
+        if getattr(self.config.training, 'scheduler', 'cosine').lower() == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer,
-                T_max=self.config.epochs,
-                eta_min=self.config.learning_rate * 0.01
+                T_max=getattr(self.config.training, 'num_epochs', 100),
+                eta_min=self.config.training.learning_rate * 0.01
             )
-        elif self.config.scheduler.lower() == "linear":
+        elif getattr(self.config.training, 'scheduler', 'cosine').lower() == "linear":
             scheduler = torch.optim.lr_scheduler.LinearLR(
                 self.optimizer,
                 start_factor=0.1,
-                total_iters=self.config.warmup_steps
+                total_iters=getattr(self.config.training, 'warmup_steps', 1000)
             )
-        elif self.config.scheduler.lower() == "constant":
+        elif getattr(self.config.training, 'scheduler', 'cosine').lower() == "constant":
             scheduler = None
         else:
-            raise ValueError(f"Unknown scheduler: {self.config.scheduler}")
+            raise ValueError(f"Unknown scheduler: {getattr(self.config.training, 'scheduler', 'cosine')}")
         
         return scheduler
     
     def _setup_logging(self):
         """Setup logging and wandb."""
         # Setup wandb if requested
-        if self.config.use_wandb:
+        if getattr(self.config.logging, 'use_wandb', False):
             wandb.init(
-                project=self.config.wandb_project,
-                name=self.config.wandb_name,
-                config=asdict(self.config)
+                project=getattr(self.config.logging, 'project', 'enhanced_msamaba'),
+                name=getattr(self.config.logging, 'name', None),
+                config=self.config.__dict__
             )
             wandb.watch(self.model)
         
         # Save config
-        config_path = self.output_dir / "training_config.json"
+        config_path = self.checkpoint_dir / "training_config.json"
         with open(config_path, 'w') as f:
-            json.dump(asdict(self.config), f, indent=2)
+            json.dump(self.config.__dict__, f, indent=2, default=str)
     
     def train_epoch(self) -> Dict[str, float]:
         """Train for one epoch."""
@@ -351,7 +352,7 @@ class MSAmbaTrainer:
                     for k, v in batch.items()}
             
             # Forward pass
-            if self.config.mixed_precision and self.scaler is not None:
+            if getattr(self.config.training, 'mixed_precision', True) and self.scaler is not None:
                 with autocast():
                     outputs = self.model(
                         {k: v for k, v in batch.items() 
@@ -359,19 +360,27 @@ class MSAmbaTrainer:
                         missing_mask=batch.get('missing_mask'),
                         return_intermediates=True
                     )
-                    loss_dict = self.loss_fn(outputs, batch)
+                    # Transform batch to match loss function expectations
+                    targets = {}
+                    if 'labels' in batch:
+                        if self.model.task_type == "regression":
+                            targets['regression'] = batch['labels']
+                        else:  # classification
+                            targets['classification'] = batch['labels']
+                    
+                    loss_dict = self.loss_fn(outputs, targets)
                     loss = loss_dict['total_loss']
                 
                 # Backward pass with scaling
                 self.scaler.scale(loss).backward()
                 
-                if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
+                if (batch_idx + 1) % getattr(self.config.training, 'gradient_accumulation_steps', 1) == 0:
                     # Gradient clipping
-                    if self.config.gradient_clip_norm > 0:
+                    if getattr(self.config.training, 'gradient_clip_norm', 1.0) > 0:
                         self.scaler.unscale_(self.optimizer)
                         torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(),
-                            self.config.gradient_clip_norm
+                            getattr(self.config.training, 'gradient_clip_norm', 1.0)
                         )
                     
                     self.scaler.step(self.optimizer)
@@ -386,18 +395,26 @@ class MSAmbaTrainer:
                     missing_mask=batch.get('missing_mask'),
                     return_intermediates=True
                 )
-                loss_dict = self.loss_fn(outputs, batch)
+                # Transform batch to match loss function expectations
+                targets = {}
+                if 'labels' in batch:
+                    if self.model.task_type == "regression":
+                        targets['regression'] = batch['labels']
+                    else:  # classification
+                        targets['classification'] = batch['labels']
+                
+                loss_dict = self.loss_fn(outputs, targets)
                 loss = loss_dict['total_loss']
                 
                 # Backward pass
                 loss.backward()
                 
-                if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
+                if (batch_idx + 1) % getattr(self.config.training, 'gradient_accumulation_steps', 1) == 0:
                     # Gradient clipping
-                    if self.config.gradient_clip_norm > 0:
+                    if getattr(self.config.training, 'gradient_clip_norm', 1.0) > 0:
                         torch.nn.utils.clip_grad_norm_(
                             self.model.parameters(),
-                            self.config.gradient_clip_norm
+                            getattr(self.config.training, 'gradient_clip_norm', 1.0)
                         )
                     
                     self.optimizer.step()
@@ -415,11 +432,11 @@ class MSAmbaTrainer:
             })
             
             # Log periodically
-            if self.global_step % self.config.log_frequency == 0:
+            if self.global_step % getattr(self.config.training, 'log_frequency', 100) == 0:
                 self._log_training_step(loss_dict, batch_idx, len(self.train_loader))
             
             # Profile if enabled
-            if self.profiler and self.global_step < self.config.profile_steps:
+            if self.profiler and self.global_step < getattr(self.config.training, 'profile_steps', 100):
                 self.profiler.step()
         
         # Update scheduler
@@ -451,12 +468,23 @@ class MSAmbaTrainer:
                     return_intermediates=True
                 )
                 
+                # Transform batch to match loss function expectations
+                targets = {}
+                if 'labels' in batch:
+                    if self.model.task_type == "regression":
+                        targets['regression'] = batch['labels']
+                    else:  # classification
+                        targets['classification'] = batch['labels']
+                
                 # Compute loss
-                loss_dict = self.loss_fn(outputs, batch)
+                loss_dict = self.loss_fn(outputs, targets)
                 total_loss += loss_dict['total_loss'].item()
                 
                 # Collect predictions and targets
-                predictions = outputs['predictions'].cpu()
+                if self.model.task_type == "regression":
+                    predictions = outputs['regression'].cpu()
+                else:  # classification
+                    predictions = outputs['classification'].cpu()
                 targets = batch['labels'].cpu()
                 
                 all_predictions.append(predictions)
@@ -478,14 +506,14 @@ class MSAmbaTrainer:
     def train(self) -> Dict[str, Any]:
         """Main training loop."""
         logger.info("Starting training...")
-        logger.info(f"Total epochs: {self.config.epochs}")
-        logger.info(f"Batch size: {self.config.batch_size}")
-        logger.info(f"Learning rate: {self.config.learning_rate}")
+        logger.info(f"Total epochs: {self.config.training.num_epochs}")
+        logger.info(f"Batch size: {self.config.training.batch_size}")
+        logger.info(f"Learning rate: {self.config.training.learning_rate}")
         
         start_time = time.time()
         
         try:
-            for epoch in range(self.config.epochs):
+            for epoch in range(self.config.training.num_epochs):
                 self.current_epoch = epoch
                 
                 # Training phase
@@ -493,7 +521,7 @@ class MSAmbaTrainer:
                 self.training_history['train_loss'].append(train_metrics['train_loss'])
                 
                 # Validation phase
-                if epoch % self.config.val_frequency == 0:
+                if epoch % getattr(self.config.training, 'val_frequency', 1) == 0:
                     val_metrics, val_outputs = self.validate()
                     self.training_history['val_loss'].append(val_metrics['val_loss'])
                     self.training_history['val_metrics'].append(val_metrics)
@@ -508,7 +536,7 @@ class MSAmbaTrainer:
                         logger.info(f"New best validation score: {self.best_val_score:.6f}")
                     
                     # Save checkpoint
-                    if epoch % self.config.save_frequency == 0 or is_best:
+                    if epoch % getattr(self.config.training, 'save_frequency', 5) == 0 or is_best:
                         self.checkpoint_manager.save_checkpoint(
                             model=self.model,
                             optimizer=self.optimizer,
@@ -542,12 +570,12 @@ class MSAmbaTrainer:
             self._save_training_results(training_time)
             
             # Cleanup
-            if self.config.use_wandb:
+            if getattr(self.config.logging, 'use_wandb', False):
                 wandb.finish()
             
             if self.profiler:
                 self.profiler.export_chrome_trace(
-                    str(self.output_dir / "profiling_trace.json")
+                    str(self.checkpoint_dir / "profiling_trace.json")
                 )
         
         logger.info(f"Training completed in {training_time:.2f} seconds")
@@ -578,11 +606,11 @@ class MSAmbaTrainer:
                 step_info[key] = value.item()
         
         # Log to wandb
-        if self.config.use_wandb:
+        if getattr(self.config.logging, 'use_wandb', False):
             wandb.log(step_info, step=self.global_step)
         
         # Log to console occasionally
-        if self.global_step % (self.config.log_frequency * 5) == 0:
+        if self.global_step % (getattr(self.config.training, 'log_frequency', 100) * 5) == 0:
             logger.info(f"Step {self.global_step}: " + 
                        ", ".join([f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}" 
                                  for k, v in step_info.items()]))
@@ -600,7 +628,7 @@ class MSAmbaTrainer:
         }
         
         # Log to wandb
-        if self.config.use_wandb:
+        if getattr(self.config.logging, 'use_wandb', False):
             wandb.log(epoch_info, step=self.global_step)
         
         # Log to console
@@ -631,12 +659,12 @@ class MSAmbaTrainer:
         }
         
         # Save results
-        results_path = self.output_dir / "training_results.json"
+        results_path = self.checkpoint_dir / "training_results.json"
         with open(results_path, 'w') as f:
             json.dump(results, f, indent=2, default=str)
         
         # Save training history as numpy arrays for easy loading
-        history_path = self.output_dir / "training_history.npz"
+        history_path = self.checkpoint_dir / "training_history.npz"
         np.savez(
             history_path,
             train_loss=np.array(self.training_history['train_loss']),
@@ -671,17 +699,17 @@ class MSAmbaTrainer:
         
         # Update config for additional epochs
         if additional_epochs > 0:
-            self.config.epochs = start_epoch + additional_epochs
+            self.config.training.num_epochs = start_epoch + additional_epochs
         
         # Continue training from the loaded epoch
-        original_epochs = self.config.epochs
-        self.config.epochs = self.config.epochs - start_epoch
+        original_epochs = self.config.training.num_epochs
+        self.config.training.num_epochs = self.config.training.num_epochs - start_epoch
         
         # Run training
         results = self.train()
         
         # Restore original config
-        self.config.epochs = original_epochs
+        self.config.training.num_epochs = original_epochs
         
         return results
 

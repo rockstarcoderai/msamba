@@ -1,6 +1,6 @@
 """Training utilities and components."""
 
-from .trainer import Trainer
+from .trainer import MSAmbaTrainer as Trainer
 from .losses import (
     MultimodalLoss,
     SentimentLoss,
