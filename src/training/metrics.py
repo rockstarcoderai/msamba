@@ -336,12 +336,30 @@ def evaluate_model(
                         # Convert to float32 if it's boolean or other type
                         if tensor.dtype != torch.float32:
                             tensor = tensor.float()
+                        
+                        # Ensure proper shape: [batch, seq_len, features]
+                        if tensor.dim() == 1:
+                            # Single sample, add batch dimension
+                            tensor = tensor.unsqueeze(0)
+                        elif tensor.dim() == 2:
+                            # [seq_len, features] -> [1, seq_len, features]
+                            tensor = tensor.unsqueeze(0)
+                        
+                        # Debug: Print tensor shapes
+                        print(f"DEBUG: {modality} tensor shape: {tensor.shape}")
+                        
                         model_inputs[modality] = tensor
                     else:
                         model_inputs[modality] = tensor
             
             # Forward pass
             outputs = model(model_inputs)
+            
+            # Ensure outputs have proper shape
+            if isinstance(outputs, torch.Tensor):
+                if outputs.dim() == 1:
+                    outputs = outputs.unsqueeze(0)  # Add batch dimension if needed
+                outputs = {'regression': outputs}  # Wrap in dict format
             
             # Prepare targets
             targets = {}

@@ -1,3 +1,97 @@
+# =========================
+# Project .gitignore (msamba)
+# =========================
+
+# --- Python build/artifacts ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packages / builds
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Byte-compiled / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+coverage.xml
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+msamba_env/
+
+# Environment files
+.env
+.env.*
+.envrc
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- IDE/editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+.DS_Store
+Thumbs.db
+
+# --- ML artifacts ---
+# Model weights / checkpoints
+*.pt
+*.pth
+*.ckpt
+*.onnx
+checkpoints/
+outputs/
+wandb/
+runs/
+tensorboard/
+
+# Profiling/traces
+*.prof
+*.trace
+profile-outputs/
+
+# --- Data files (keep structure, ignore heavy blobs) ---
+data/**/*.pkl
+data/**/*.h5
+data/**/*.hdf5
+data/**/*.npz
+data/**/*.npy
+data/**/*.csv
+data/**/*.tsv
+data/**/*.jsonl
+data/**/*.mp4
+data/**/*.wav
+data/**/*.zip
+data/**/*.tar
+data/**/*.gz
+
+# Allow lightweight placeholders/docs in data/
+!data/.gitkeep
+!data/README.md
+
+# --- Project specific ---
+outputs/**
+!outputs/.gitkeep
+
+# OS junk
+.Trash-*/
+
 # Virtual environments
 /venv/
 /.venv/

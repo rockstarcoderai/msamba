@@ -22,8 +22,8 @@ class ModelConfig:
     
     # Modality dimensions
     text_dim: int = 768
-    audio_dim: int = 74
-    vision_dim: int = 47
+    audio_dim: int = 5
+    vision_dim: int = 20
     
     # Hierarchy settings
     hierarchy_levels: int = 3

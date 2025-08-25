@@ -163,7 +163,13 @@ class MultimodalDataset(Dataset):
         data_path = Path(self.config.data_path)
         
         if self.config.name.lower() in ["mosi", "mosei"]:
-            return self._load_cmu_data(data_path)
+            # Look in dataset-specific subdirectory
+            dataset_path = data_path / self.config.name.lower()
+            if dataset_path.exists():
+                return self._load_cmu_data(dataset_path)
+            else:
+                # Fallback to main data directory
+                return self._load_cmu_data(data_path)
         elif self.config.name.lower() == "sims":
             return self._load_sims_data(data_path)
         else:
@@ -219,8 +225,8 @@ class MultimodalDataset(Dataset):
         if self.config.name.lower() == "mosi":
             data = {
                 'text': np.random.randn(n_samples, self.config.max_seq_len, 768),
-                'audio': np.random.randn(n_samples, self.config.max_seq_len, 74),
-                'vision': np.random.randn(n_samples, self.config.max_seq_len, 47),
+                'audio': np.random.randn(n_samples, self.config.max_seq_len, 5),
+                'vision': np.random.randn(n_samples, self.config.max_seq_len, 20),
                 'labels': np.random.uniform(-3, 3, n_samples),
                 'ids': list(range(n_samples))
             }
